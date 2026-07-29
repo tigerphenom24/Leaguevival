@@ -1,6 +1,14 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
+const http = require('http');
+
+// ── KEEP-ALIVE PING SERVER ───────────────────────────────────────────────────
+// UptimeRobot hits this URL every 5 minutes to keep Replit awake
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Leaguevival Bot is alive ✅');
+}).listen(3000, () => console.log('✅ Ping server running on port 3000'));
 
 // ── CONFIG ──────────────────────────────────────────────────────────────────
 // All secrets come from environment variables — never hardcode these
