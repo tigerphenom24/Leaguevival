@@ -69,30 +69,42 @@ async function getSchedule() {
   };
 }
 
-// Find the current active betting week (earliest week with incomplete games)
+// Find the current active betting week — highest week number that has incomplete games
 function getCurrentWeek(schedule) {
   const weeks = Object.keys(schedule).map(Number).sort((a, b) => a - b);
-  for (const week of weeks) {
-    const games = schedule[week] || [];
-    if (games.some(g => !g.completed)) return week;
-  }
+  // Find all weeks with at least one incomplete game
+  const activeWeeks = weeks.filter(week => {
+    const games = schedule[week];
+    if (!games) return false;
+    // Handle both array and object formats from Firebase
+    const gameList = Array.isArray(games) ? games : Object.values(games);
+    return gameList.some(g => g && !g.completed && g.home && g.away);
+  });
+  if (activeWeeks.length > 0) return activeWeeks[0]; // earliest incomplete week
+  // All games complete — return the last week
   return weeks[weeks.length - 1] || 1;
 }
 
 // Find a game by team name (fuzzy match — case insensitive, partial match)
 function findGame(schedule, week, teamInput) {
-  const games = schedule[week] || [];
+  const games = schedule[week];
+  if (!games) return null;
+  const gameList = Array.isArray(games) ? games : Object.values(games);
   const query = teamInput.toLowerCase().trim();
-  const idx = games.findIndex(g =>
-    (g.home || '').toLowerCase().includes(query) ||
-    (g.away || '').toLowerCase().includes(query)
+  const idx = gameList.findIndex(g =>
+    g && ((g.home || '').toLowerCase().includes(query) ||
+    (g.away || '').toLowerCase().includes(query))
   );
-  return idx >= 0 ? { game: games[idx], idx } : null;
+  return idx >= 0 ? { game: gameList[idx], idx } : null;
 }
 
 // Lock or unlock a game in Firebase
 async function setGameLock(week, idx, locked) {
-  const games = (await db.ref(`season_schedule/${week}`).once('value')).val() || [];
+  const snap = await db.ref(`season_schedule/${week}`).once('value');
+  const raw = snap.val();
+  if (!raw) return false;
+  // Firebase may return array or object — normalize to array
+  const games = Array.isArray(raw) ? [...raw] : Object.values(raw);
   if (!games[idx]) return false;
   games[idx] = { ...games[idx], betsLocked: locked };
   await db.ref(`season_schedule/${week}`).set(games);
@@ -193,15 +205,21 @@ client.on('interactionCreate', async interaction => {
 
     // ── /betsstatus ───────────────────────────────────────────────────────────
     else if (commandName === 'betsstatus') {
-      const games = schedule[week] || [];
-      const upcoming = games.filter(g => !g.completed && g.home && g.away);
+      const allWeeks = Object.keys(schedule).map(Number).sort((a,b)=>a-b);
+      const games = schedule[week];
+      const gameList = games ? (Array.isArray(games) ? games : Object.values(games)) : [];
+      const upcoming = gameList.filter(g => g && g.home && g.away && !g.completed);
 
       if (!upcoming.length) {
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(0xC9A84C)
             .setTitle(`Week ${week} — Bet Status`)
-            .setDescription('No upcoming games found for this week.')
+            .setDescription(
+              `No upcoming games found for Week ${week}.\n\n` +
+              `**Debug:** Weeks in schedule: ${allWeeks.join(', ')}\n` +
+              `Total games in week ${week}: ${gameList.length}`
+            )
           ]
         });
         return;
