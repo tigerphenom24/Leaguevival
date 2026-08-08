@@ -94,29 +94,34 @@ function getCurrentWeek(schedule) {
 }
 
 // Find a game by team name (fuzzy match — case insensitive, partial match)
+// Returns the Firebase key (idx) so setGameLock writes to the right path
 function findGame(schedule, week, teamInput) {
   const games = schedule[week];
   if (!games) return null;
-  const gameList = Array.isArray(games) ? games : Object.values(games);
   const query = teamInput.toLowerCase().trim();
-  const idx = gameList.findIndex(g =>
+  // Iterate over entries to preserve the original key (Firebase index)
+  const entries = Array.isArray(games)
+    ? games.map((g, i) => [String(i), g])
+    : Object.entries(games);
+  const found = entries.find(([key, g]) =>
     g && ((g.home || '').toLowerCase().includes(query) ||
-    (g.away || '').toLowerCase().includes(query))
+          (g.away || '').toLowerCase().includes(query))
   );
-  return idx >= 0 ? { game: gameList[idx], idx } : null;
+  return found ? { game: found[1], idx: found[0] } : null;
 }
 
-// Lock or unlock a game in Firebase
+// Lock or unlock a game in Firebase — write directly to the specific game path
+// to avoid array/object ordering issues with read-modify-write
 async function setGameLock(week, idx, locked) {
-  const snap = await db.ref(`season_schedule/${week}`).once('value');
-  const raw = snap.val();
-  if (!raw) return false;
-  // Firebase may return array or object — normalize to array
-  const games = Array.isArray(raw) ? [...raw] : Object.values(raw);
-  if (!games[idx]) return false;
-  games[idx] = { ...games[idx], betsLocked: locked };
-  await db.ref(`season_schedule/${week}`).set(games);
-  return true;
+  // Try direct array index path first (most common format)
+  const directPath = `season_schedule/${week}/${idx}/betsLocked`;
+  try {
+    await db.ref(directPath).set(locked);
+    return true;
+  } catch (err) {
+    console.error('setGameLock direct path failed:', err);
+    return false;
+  }
 }
 
 // ── COMMAND HANDLER ──────────────────────────────────────────────────────────
